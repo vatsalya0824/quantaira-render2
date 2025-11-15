@@ -8,7 +8,8 @@ from typing import Optional
 from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
-from db import engine, init_db
+
+from .db import engine, init_db  
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "dev_secret")
 
