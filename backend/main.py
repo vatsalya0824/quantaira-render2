@@ -1,3 +1,4 @@
+# backend/main.py
 import os
 import json
 import traceback
@@ -84,7 +85,6 @@ async def webhook_tenovi(request: Request):
                 except Exception:
                     created_utc = now
 
-                # valid JSON for Postgres
                 raw_json = json.dumps(item, default=str)
 
                 conn.execute(
@@ -110,12 +110,10 @@ async def webhook_tenovi(request: Request):
         return {"inserted": inserted}
 
     except HTTPException:
-        # pass through known HTTP errors
         raise
     except Exception as e:
         print("❌ ERROR in /webhook/tenovi:", str(e))
         traceback.print_exc()
-        # ensure Tenovi gets a JSON response, and details go to logs
         raise HTTPException(status_code=500, detail="Server error — check logs")
 
 # ---------- read API for dashboard ----------
