@@ -1,4 +1,5 @@
 # backend/main.py
+
 import os
 import json
 import traceback
@@ -9,7 +10,7 @@ from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from .db import engine, init_db  
+from .db import engine, init_db
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "dev_secret")
 
@@ -40,7 +41,7 @@ class TenoviMeasurement(BaseModel):
     device_id: Optional[str] = None
     device_name: Optional[str] = None
 
-# ---------- webhook ----------
+# ---------- webhook (Tenovi → DB) ----------
 @app.post("/webhook/tenovi")
 async def webhook_tenovi(request: Request):
     try:
@@ -79,22 +80,26 @@ async def webhook_tenovi(request: Request):
                 except Exception:
                     m = TenoviMeasurement(metric=str(item.get("metric", "unknown")))
 
-                # choose timestamp
+                # choose timestamp (prefer created, fall back to timestamp, then now)
                 ts = item.get("created") or item.get("timestamp") or now.isoformat()
                 try:
-                    created_utc = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc)
+                    created_utc = datetime.fromisoformat(
+                        ts.replace("Z", "+00:00")
+                    ).astimezone(timezone.utc)
                 except Exception:
                     created_utc = now
 
                 raw_json = json.dumps(item, default=str)
 
                 conn.execute(
-                    text("""
+                    text(
+                        """
                         INSERT INTO measurements
                           (created_utc, metric, value_1, value_2, device_id, device_name, raw)
                         VALUES
                           (:created_utc, :metric, :value_1, :value_2, :device_id, :device_name, CAST(:raw AS JSONB))
-                    """),
+                        """
+                    ),
                     {
                         "created_utc": created_utc,
                         "metric": (m.metric or "unknown"),
@@ -103,7 +108,7 @@ async def webhook_tenovi(request: Request):
                         "device_id": item.get("hwi_device_id") or m.device_id,
                         "device_name": item.get("device_name") or m.device_name,
                         "raw": raw_json,
-                    }
+                    },
                 )
                 inserted += 1
 
@@ -120,15 +125,22 @@ async def webhook_tenovi(request: Request):
 # ---------- read API for dashboard ----------
 @app.get("/api/measurements")
 def api_measurements(hours: int = 72):
+    """
+    Return measurements for the last `hours` hours.
+
+    This is what your Streamlit dashboard calls with ?hours=24, 72, 168, etc.
+    """
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     with engine.begin() as conn:
         rows = conn.execute(
-            text("""
-              SELECT created_utc, metric, value_1, value_2, device_id, device_name
-              FROM measurements
-              WHERE created_utc >= :cutoff
-              ORDER BY created_utc
-            """),
-            {"cutoff": cutoff}
+            text(
+                """
+                SELECT created_utc, metric, value_1, value_2, device_id, device_name
+                FROM measurements
+                WHERE created_utc >= :cutoff
+                ORDER BY created_utc
+                """
+            ),
+            {"cutoff": cutoff},
         ).mappings().all()
     return [dict(r) for r in rows]
