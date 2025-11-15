@@ -1,3 +1,4 @@
+# backend/db.py
 import os
 import sqlalchemy as sa
 from sqlalchemy import text
