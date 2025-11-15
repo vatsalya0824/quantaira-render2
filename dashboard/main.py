@@ -1,6 +1,6 @@
 # dashboard/main.py
 # Quantaira Dashboard — iOS-style teal pills, colored segments, stats card on the right,
-# notes + meals + recent-meals section, 24h/3d/7d/30d windows.
+# notes + meals + recent-meals section, 24h/3d/7d/30d windows, backend `hours` param.
 
 from datetime import datetime
 from pathlib import Path
@@ -16,31 +16,26 @@ from streamlit.components.v1 import html as st_html
 import requests
 
 # ─────────────────────────────────────────────
-# Backend fetcher — always call Render API directly
+# Fetcher + helpers (use backend `hours`)
 # ─────────────────────────────────────────────
-API_BASE = os.getenv("API_BASE") or st.secrets.get(
-    "API_BASE",
-    "https://quantaira-render2.onrender.com/api"
-)
-API_BASE = API_BASE.rstrip("/")
+try:
+    # If you already have fetcher.py, we use that
+    from fetcher import fetch_data
+except ImportError:
+    # fallback: simple HTTP fetcher (backend must support ?hours=&patient_id=)
+    API_BASE = os.getenv("API_BASE") or st.secrets.get(
+        "API_BASE", "https://quantaira-render2.onrender.com/api"
+    )
+    API_BASE = API_BASE.rstrip("/")
 
+    def fetch_data(hours: int, patient_id: str | None = None):
+        params = {"hours": hours}
+        if patient_id:
+            params["patient_id"] = patient_id
+        r = requests.get(f"{API_BASE}/measurements", params=params, timeout=15)
+        r.raise_for_status()
+        return pd.DataFrame(r.json())
 
-def fetch_data(hours: int, patient_id: str | None = None) -> pd.DataFrame:
-    """
-    Call Quantaira backend to get last `hours` of data for a patient.
-    """
-    params: dict[str, object] = {"hours": hours}
-    if patient_id:
-        params["patient_id"] = patient_id
-    r = requests.get(f"{API_BASE}/measurements", params=params, timeout=15)
-    r.raise_for_status()
-    data = r.json()
-    return pd.DataFrame(data)
-
-
-# ─────────────────────────────────────────────
-# Shared helpers (same as Patient page)
-# ─────────────────────────────────────────────
 import common
 common = reload(common)
 from common import best_ts_col, convert_tz, split_blood_pressure  # type: ignore
@@ -49,7 +44,7 @@ from common import best_ts_col, convert_tz, split_blood_pressure  # type: ignore
 # Page config
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="Quantaira Dashboard", layout="wide")
-BUILD_TAG = "quantaira-dashboard v3 (iOS layout, markers)"
+BUILD_TAG = "quantaira-dashboard v3 (backend-hours + pills)"
 st.markdown(
     f"<div style='opacity:.45;font:12px/1.2 ui-sans-serif,system-ui'>build {BUILD_TAG}</div>",
     unsafe_allow_html=True,
@@ -63,17 +58,25 @@ if not USDA_API_KEY:
     st.warning("USDA_API_KEY not set (env var or .streamlit/secrets.toml)")
 
 P = {
-    "bg": "#F6FBFD", "ink": "#0F172A", "muted": "#667085",
-    "chip": "#F3F6F8", "chipBrd": "rgba(2,6,23,.08)",
-    "tealA": "#48C9C3", "tealB": "#3FB7B2", "glow": "rgba(68,194,189,.32)",
+    "bg": "#F6FBFD",
+    "ink": "#0F172A",
+    "muted": "#667085",
+    "chip": "#F3F6F8",
+    "chipBrd": "rgba(2,6,23,.08)",
+    "tealA": "#48C9C3",
+    "tealB": "#3FB7B2",
+    "glow": "rgba(68,194,189,.32)",
     # GREEN=above, YELLOW=normal, RED=below
-    "segGreen": "#10B981", "segYellow": "#FACC15", "segRed": "#EF4444",
+    "segGreen": "#10B981",
+    "segYellow": "#FACC15",
+    "segRed": "#EF4444",
     "refLine": "rgba(15,23,42,.45)",
-    "pillDot": "#0F172A", "mealDot": "#f472b6", "noteDot": "#14b8a6",
+    "pillDot": "#0F172A",
+    "mealDot": "#f472b6",
+    "noteDot": "#14b8a6",
 }
 UNITS = {"pulse": "bpm", "systolic_bp": "mmHg", "diastolic_bp": "mmHg", "spo2": "%"}
 
-# sensible global defaults for LSL/USL
 DEFAULT_LIMITS = {
     "pulse": (60, 100),
     "systolic_bp": (90, 130),
@@ -87,21 +90,23 @@ DEFAULT_LIMITS = {
 DATA_DIR = Path(".user_state")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-
 def _meals_path(pid: str) -> Path:
     return DATA_DIR / f"meals_{pid}.csv"
-
 
 def _notes_path(pid: str) -> Path:
     return DATA_DIR / f"notes_{pid}.csv"
 
-
 MEAL_COLS = [
-    "timestamp_utc", "food", "kcal", "protein_g",
-    "carbs_g", "fat_g", "sodium_mg", "fdc_id"
+    "timestamp_utc",
+    "food",
+    "kcal",
+    "protein_g",
+    "carbs_g",
+    "fat_g",
+    "sodium_mg",
+    "fdc_id",
 ]
 NOTE_COLS = ["timestamp_utc", "note"]
-
 
 def load_meals(pid: str) -> pd.DataFrame:
     p = _meals_path(pid)
@@ -109,9 +114,10 @@ def load_meals(pid: str) -> pd.DataFrame:
         return pd.DataFrame(columns=MEAL_COLS)
     df = pd.read_csv(p, dtype={"fdc_id": "string"})
     if "timestamp_utc" in df.columns:
-        df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True, errors="coerce")
+        df["timestamp_utc"] = pd.to_datetime(
+            df["timestamp_utc"], utc=True, errors="coerce"
+        )
     return df[MEAL_COLS].dropna(subset=["timestamp_utc"])
-
 
 def load_notes(pid: str) -> pd.DataFrame:
     p = _notes_path(pid)
@@ -119,23 +125,26 @@ def load_notes(pid: str) -> pd.DataFrame:
         return pd.DataFrame(columns=NOTE_COLS)
     df = pd.read_csv(p)
     if "timestamp_utc" in df.columns:
-        df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True, errors="coerce")
+        df["timestamp_utc"] = pd.to_datetime(
+            df["timestamp_utc"], utc=True, errors="coerce"
+        )
     return df[NOTE_COLS].dropna(subset=["timestamp_utc"])
-
 
 def save_meals(pid: str, df: pd.DataFrame):
     out = df.copy()
-    out["timestamp_utc"] = pd.to_datetime(out["timestamp_utc"], utc=True, errors="coerce")
+    out["timestamp_utc"] = pd.to_datetime(
+        out["timestamp_utc"], utc=True, errors="coerce"
+    )
     out = out[MEAL_COLS].sort_values("timestamp_utc").reset_index(drop=True)
     out.to_csv(_meals_path(pid), index=False)
 
-
 def save_notes(pid: str, df: pd.DataFrame):
     out = df.copy()
-    out["timestamp_utc"] = pd.to_datetime(out["timestamp_utc"], utc=True, errors="coerce")
+    out["timestamp_utc"] = pd.to_datetime(
+        out["timestamp_utc"], utc=True, errors="coerce"
+    )
     out = out[NOTE_COLS].sort_values("timestamp_utc").reset_index(drop=True)
     out.to_csv(_notes_path(pid), index=False)
-
 
 # ─────────────────────────────────────────────
 # Session state
@@ -149,8 +158,6 @@ def _get_param(key: str, default: str):
         pass
     return st.session_state.get(key, default)
 
-
-# you can pass ?pid=54321&name=Todd in URL if needed
 pid = str(_get_param("pid", "quantaira"))
 name = str(_get_param("name", "Quantaira Dashboard"))
 
@@ -159,7 +166,12 @@ if "win" not in st.session_state:
 if "metric_sel" not in st.session_state:
     st.session_state.metric_sel = "systolic_bp"
 
-HOURS_LOOKUP = {"24h": 24, "3d": 72, "7d": 7 * 24, "30d": 30 * 24}
+HOURS_LOOKUP = {
+    "24h": 24,
+    "3d": 72,
+    "7d": 7 * 24,
+    "30d": 30 * 24,
+}
 
 if "limits" not in st.session_state:
     st.session_state.limits = {}
@@ -172,7 +184,7 @@ else:
 if "limit_mode" not in st.session_state:
     st.session_state.limit_mode = "Global defaults"
 
-# Initialize meals/notes on first load for this patient
+# Meals/notes persistence
 if "persist_loaded_for" not in st.session_state or st.session_state.persist_loaded_for != pid:
     st.session_state["meals"] = load_meals(pid)
     st.session_state["notes"] = load_notes(pid)
@@ -180,7 +192,7 @@ if "persist_loaded_for" not in st.session_state or st.session_state.persist_load
     st.session_state.persist_loaded_for = pid
 
 # ─────────────────────────────────────────────
-# CSS — match Patient page look
+# CSS — teal pills, chart card, stats card
 # ─────────────────────────────────────────────
 st.markdown(
     f"""
@@ -235,7 +247,7 @@ st.markdown(
       box-shadow:0 8px 16px rgba(17,24,39,.10) !important;
   }}
 
-  /* active pills */
+  /* active pills (time + metric) */
   .stButton > button#tw_{st.session_state.win}-button,
   .stButton > button#metric_{st.session_state.metric_sel}-button {{
       background:linear-gradient(180deg,{P['tealA']},{P['tealB']}) !important;
@@ -333,14 +345,11 @@ for i, m in enumerate(METRIC_LABELS.keys()):
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# Data loading
-# ─────────────────────────────────────────────
-# ─────────────────────────────────────────────
-# Data loading
+# Data loading — USE BACKEND HOURS
 # ─────────────────────────────────────────────
 def load_window(hours: int) -> pd.DataFrame:
     """
-    Pull data from backend and attach a `timestamp_utc` column.
+    Ask backend for last `hours` hours of data and attach `timestamp_utc`.
     """
     try:
         df = fetch_data(hours=hours, patient_id=pid)
@@ -352,16 +361,13 @@ def load_window(hours: int) -> pd.DataFrame:
 
     df = df.copy()
 
-    # 0) explicit known timestamp col names from Tenovi / backend
+    # Prefer explicit backend time columns
     if "timestamp_utc" in df.columns:
         ts_col = "timestamp_utc"
-    elif "created_utc" in df.columns:          # <-- this is what your API has
+    elif "created_utc" in df.columns:
         ts_col = "created_utc"
     else:
-        # 1) try helper that knows common names
         ts_col = best_ts_col(df)
-
-        # 2) if that failed, look for anything containing "time" or "date"
         if ts_col is None:
             for c in df.columns:
                 cl = c.lower()
@@ -369,17 +375,15 @@ def load_window(hours: int) -> pd.DataFrame:
                     ts_col = c
                     break
 
-    # 3) if we STILL couldn't find a time column, just bail safely
     if ts_col is None or ts_col not in df.columns:
-        # show columns so we can see what Tenovi sends
         st.write("Could not find timestamp column. Columns from API:", list(df.columns))
         return pd.DataFrame()
 
-    # 4) finally, build a proper UTC timestamp column
     df["timestamp_utc"] = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
     return df.dropna(subset=["timestamp_utc"])
 
-raw = load_window(HOURS_LOOKUP[st.session_state.win])
+hours = HOURS_LOOKUP[st.session_state.win]
+raw = load_window(hours)
 raw = split_blood_pressure(raw)
 
 if raw.empty:
@@ -389,11 +393,11 @@ if raw.empty:
 try:
     newest = pd.to_datetime(raw["timestamp_utc"], utc=True, errors="coerce").max()
     st.caption(
-        "Newest data point in source: "
+        f"Window: last {hours}h · Newest data point: "
         + newest.tz_convert(tz_choice).strftime("%b %d, %H:%M %Z")
     )
 except Exception:
-    pass
+    st.caption(f"Window: last {hours}h")
 
 # ─────────────────────────────────────────────
 # Prepare + pill events
@@ -410,17 +414,18 @@ def prepare(df: pd.DataFrame, tz_name: str):
             "pillbox", na=False
         )
 
-    pill_events = df.loc[is_pill, "timestamp_utc"].dropna().sort_values().unique().tolist()
+    pill_events = (
+        df.loc[is_pill, "timestamp_utc"].dropna().sort_values().unique().tolist()
+    )
 
     plot_df = df.loc[~is_pill].copy()
     plot_df["local_time"] = convert_tz(plot_df["timestamp_utc"], tz_name)
     return plot_df, pill_events
 
-
 plot_df, pill_events = prepare(raw, tz_choice)
 
 # ─────────────────────────────────────────────
-# Limits helpers
+# Limit helpers
 # ─────────────────────────────────────────────
 def suggest_limits(values: pd.Series):
     s = pd.to_numeric(values, errors="coerce").dropna()
@@ -429,7 +434,6 @@ def suggest_limits(values: pd.Series):
     mu = float(s.mean())
     sd = float(s.std(ddof=0) or 0.0)
     return mu - 0.5 * sd, mu + 0.5 * sd
-
 
 def get_limits_for_mode(mode: str, pid: str, metric: str, values: pd.Series):
     if mode == "Patient override":
@@ -445,7 +449,6 @@ def get_limits_for_mode(mode: str, pid: str, metric: str, values: pd.Series):
             return float(g[0]), float(g[1])
         return suggest_limits(values)
 
-    # Auto
     return suggest_limits(values)
 
 # ─────────────────────────────────────────────
@@ -460,20 +463,22 @@ def nearest_indices_utc(x_ts, event_ts_list):
         .view("int64")
         .values
     )
-    out: list[int] = []
+    out = []
     for e in event_ts_list:
         e_i64 = pd.Timestamp(e).tz_convert("UTC").value
         out.append(int(np.argmin(np.abs(x_utc - e_i64))))
     return sorted(set(out))
 
 # ─────────────────────────────────────────────
-# Chart.js helpers
+# Chart.js helper — single metric with markers & colored segments
 # ─────────────────────────────────────────────
 def chartjs_single_with_markers(
     x, y, pill_idx, meal_idx, note_idx, lsl, usl, key="cj_single", height=460
 ):
     labels = [pd.to_datetime(t).strftime("%b %d %H:%M") for t in x]
-    data = [None if pd.isna(v) else float(v) for v in pd.to_numeric(y, errors="coerce")]
+    data = [
+        None if pd.isna(v) else float(v) for v in pd.to_numeric(y, errors="coerce")
+    ]
 
     def mask_points(idxs, arr):
         out = [None] * len(arr)
@@ -486,7 +491,7 @@ def chartjs_single_with_markers(
     meal_points = mask_points(meal_idx, data)
     note_points = mask_points(note_idx, data)
 
-    ref_datasets: list[dict] = []
+    ref_datasets = []
     if show_ref and len(data) > 0:
         if lsl is not None:
             ref_datasets.append(
@@ -582,253 +587,13 @@ def chartjs_single_with_markers(
     )
     st_html(html, height=height, scrolling=False)
 
-
-def chartjs_dual_bp_with_markers(
-    x, y1, y2, pill_idx, meal_idx, note_idx,
-    lsl1, usl1, lsl2, usl2, key="cj_bp_both", height=460
-):
-    labels = [pd.to_datetime(t).strftime("%b %d %H:%M") for t in x]
-    d1 = [None if pd.isna(v) else float(v) for v in pd.to_numeric(y1, errors="coerce")]
-    d2 = [None if pd.isna(v) else float(v) for v in pd.to_numeric(y2, errors="coerce")]
-
-    def mask_points(idxs, arr):
-        out = [None] * len(arr)
-        for i in idxs:
-            if 0 <= i < len(arr) and arr[i] is not None:
-                out[i] = arr[i]
-        return out
-
-    pill1 = mask_points(pill_idx, d1); pill2 = mask_points(pill_idx, d2)
-    meal1 = mask_points(meal_idx, d1); meal2 = mask_points(meal_idx, d2)
-    note1 = mask_points(note_idx, d1); note2 = mask_points(note_idx, d2)
-
-    ref_datasets: list[dict] = []
-    if show_ref and len(d1) > 0:
-        if lsl1 is not None:
-            ref_datasets.append(
-                {
-                    "label": "LSL (SBP)",
-                    "data": [None if v is None else float(lsl1) for v in d1],
-                    "borderColor": P["refLine"],
-                    "borderWidth": 1.2,
-                    "borderDash": [6, 4],
-                    "pointRadius": 0,
-                }
-            )
-        if usl1 is not None:
-            ref_datasets.append(
-                {
-                    "label": "USL (SBP)",
-                    "data": [None if v is None else float(usl1) for v in d1],
-                    "borderColor": P["refLine"],
-                    "borderWidth": 1.2,
-                    "borderDash": [6, 4],
-                    "pointRadius": 0,
-                }
-            )
-    if show_ref and len(d2) > 0:
-        if lsl2 is not None:
-            ref_datasets.append(
-                {
-                    "label": "LSL (DBP)",
-                    "data": [None if v is None else float(lsl2) for v in d2],
-                    "borderColor": P["refLine"],
-                    "borderWidth": 1.2,
-                    "borderDash": [6, 4],
-                    "pointRadius": 0,
-                }
-            )
-        if usl2 is not None:
-            ref_datasets.append(
-                {
-                    "label": "USL (DBP)",
-                    "data": [None if v is None else float(usl2) for v in d2],
-                    "borderColor": P["refLine"],
-                    "borderWidth": 1.2,
-                    "borderDash": [6, 4],
-                    "pointRadius": 0,
-                }
-            )
-
-    html_tpl = Template(
-        """
-    <div class="chart-wrap" style="height:${height}px"><canvas id="${cid}"></canvas></div>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script>
-      (function(){
-        const LSLs = [${lsl1}, ${lsl2}], USLs = [${usl1}, ${usl2}];
-        const C_GREEN='${c_green}', C_YELLOW='${c_yellow}', C_RED='${c_red}';
-
-        const baseDatasets = [
-          { label:'Systolic', data:${d1}, borderWidth:${line_w},
-            tension:0.55, cubicInterpolationMode:'monotone', pointRadius:0, spanGaps:true,
-            segment:{ borderColor: s => {
-              const LSL=LSLs[0], USL=USLs[0];
-              const y0=s.p0.parsed.y, y1=s.p1.parsed.y; if (y0==null||y1==null) return C_YELLOW;
-              const m=(y0+y1)/2; if (USL!=null && m>USL) return C_GREEN;
-              if (LSL!=null && m<LSL) return C_RED; return C_YELLOW;
-            }}
-          },
-          { label:'Diastolic', data:${d2}, borderWidth:${line_w},
-            tension:0.55, cubicInterpolationMode:'monotone', pointRadius:0, spanGaps:true,
-            segment:{ borderColor: s => {
-              const LSL=LSLs[1], USL=USLs[1];
-              const y0=s.p0.parsed.y, y1=s.p1.parsed.y; if (y0==null||y1==null) return C_YELLOW;
-              const m=(y0+y1)/2; if (USL!=null && m>USL) return C_GREEN;
-              if (LSL!=null && m<LSL) return C_RED; return C_YELLOW;
-            }}
-          },
-
-          { data:${pill1}, showLine:false, borderColor:'{pill}', backgroundColor:'{pill}',
-            pointBorderColor:'#FFFFFF', pointBorderWidth:2, pointRadius:${marker_sz} },
-          { data:${pill2}, showLine:false, borderColor:'{pill}', backgroundColor:'{pill}',
-            pointBorderColor:'#FFFFFF', pointBorderWidth:2, pointRadius:${marker_sz} },
-
-          { data:${meal1}, showLine:false, borderColor:'{meal}', backgroundColor:'{meal}',
-            pointBorderColor:'#FFFFFF', pointBorderWidth:2, pointRadius:${marker_sz} },
-          { data:${meal2}, showLine:false, borderColor:'{meal}', backgroundColor:'{meal}',
-            pointBorderColor:'#FFFFFF', pointBorderWidth:2, pointRadius:${marker_sz} },
-
-          { data:${note1}, showLine:false, borderColor:'{note}', backgroundColor:'{note}',
-            pointBorderColor:'#FFFFFF', pointBorderWidth:2, pointRadius:${marker_sz} },
-          { data:${note2}, showLine:false, borderColor:'{note}', backgroundColor:'{note}',
-            pointBorderColor:'#FFFFFF', pointBorderWidth:2, pointRadius:${marker_sz} }
-        ];
-        const refDatasets = ${ref_datasets};
-
-        const ctx = document.getElementById('${cid}').getContext('2d');
-        new Chart(ctx,{
-          type:'line',
-          data:{ labels:${labels}, datasets: baseDatasets.concat(refDatasets) },
-          options:{
-            responsive:true, maintainAspectRatio:false,
-            plugins:{ legend:{ display:false }, tooltip:{intersect:false, mode:'index'} },
-            interaction:{ intersect:false, mode:'index' },
-            scales:{
-              x:{ grid:{color:'rgba(120,120,180,0.18)'},
-                  ticks:{autoSkip:true,maxTicksLimit:6,maxRotation:0,minRotation:0}},
-              y:{ grid:{color:'rgba(0,0,0,0.06)'} }
-            }
-          }
-        });
-      })();
-    </script>
-    """.replace("{pill}", P["pillDot"])
-        .replace("{meal}", P["mealDot"])
-        .replace("{note}", P["noteDot"])
-    )
-
-    html = html_tpl.substitute(
-        height=int(height),
-        cid=key,
-        labels=json.dumps(labels),
-        d1=json.dumps(d1),
-        d2=json.dumps(d2),
-        pill1=json.dumps(pill1),
-        pill2=json.dumps(pill2),
-        meal1=json.dumps(meal1),
-        meal2=json.dumps(meal2),
-        note1=json.dumps(note1),
-        note2=json.dumps(note2),
-        marker_sz=max(6, int(marker_size)),
-        line_w=int(line_w),
-        lsl1=("null" if lsl1 is None else f"{float(lsl1):.6f}"),
-        usl1=("null" if usl1 is None else f"{float(usl1):.6f}"),
-        lsl2=("null" if lsl2 is None else f"{float(lsl2):.6f}"),
-        usl2=("null" if usl2 is None else f"{float(usl2):.6f}"),
-        c_green=P["segGreen"],
-        c_yellow=P["segYellow"],
-        c_red=P["segRed"],
-        ref_datasets=json.dumps(ref_datasets),
-    )
-    st_html(html, height=height, scrolling=False)
-
 # ─────────────────────────────────────────────
 # Render main chart + stats
 # ─────────────────────────────────────────────
 metric = st.session_state.metric_sel
 
 if metric == "bp_both":
-    sbp = plot_df[plot_df["metric"] == "systolic_bp"].copy().sort_values("local_time")
-    dbp = plot_df[plot_df["metric"] == "diastolic_bp"].copy().sort_values("local_time")
-    if sbp.empty and dbp.empty:
-        st.info("No BP data.")
-    else:
-        x = sorted(
-            pd.to_datetime(pd.Index(sbp["local_time"]).append(pd.Index(dbp["local_time"]))).unique()
-        )
-
-        def to_map(df: pd.DataFrame):
-            return {
-                pd.to_datetime(t): float(v) if pd.notna(v) else None
-                for t, v in zip(df["local_time"], pd.to_numeric(df["value"], errors="coerce"))
-            }
-
-        m1 = to_map(sbp)
-        m2 = to_map(dbp)
-        y1 = [m1.get(ts, None) for ts in x]
-        y2 = [m2.get(ts, None) for ts in x]
-
-        lsl1, usl1 = get_limits_for_mode(st.session_state.limit_mode, pid, "systolic_bp", sbp["value"])
-        lsl2, usl2 = get_limits_for_mode(st.session_state.limit_mode, pid, "diastolic_bp", dbp["value"])
-
-        meals_ts = (
-            st.session_state["meals"]["timestamp_utc"].tolist()
-            if not st.session_state["meals"].empty
-            else []
-        )
-        notes_ts = (
-            st.session_state["notes"]["timestamp_utc"].tolist()
-            if not st.session_state["notes"].empty
-            else []
-        )
-        pill_idx = nearest_indices_utc(x, pill_events)
-        meal_idx = nearest_indices_utc(x, meals_ts)
-        note_idx = nearest_indices_utc(x, notes_ts)
-
-        chart_col, stats_col = st.columns([9, 3], gap="large")
-        with chart_col:
-            chartjs_dual_bp_with_markers(
-                x, y1, y2, pill_idx, meal_idx, note_idx,
-                lsl1, usl1, lsl2, usl2,
-                key=f"cj_bp_both_{st.session_state.win}",
-            )
-        with stats_col:
-            s1 = pd.to_numeric(sbp["value"], errors="coerce").dropna()
-            s2 = pd.to_numeric(dbp["value"], errors="coerce").dropna()
-
-            def fmt_stats(s: pd.Series, unit: str):
-                if s.empty:
-                    return "—", "—", "—", "—"
-                latest = f"{float(s.iloc[-1]):.1f} {unit}"
-                mean_s = f"{s.mean():.1f}"
-                std_s = f"{s.std(ddof=0):.1f}"
-                rng = f"{s.min():.1f}–{s.max():.1f}"
-                return latest, mean_s, std_s, rng
-
-            sbp_latest, sbp_mean, sbp_std, sbp_rng = fmt_stats(s1, "mmHg")
-            dbp_latest, dbp_mean, dbp_std, dbp_rng = fmt_stats(s2, "mmHg")
-
-            st.markdown(
-                "<div class='stats'><h4>SBP stats</h4>"
-                + f"<div><b>LSL/USL:</b> {'—' if lsl1 is None else f'{lsl1:.1f}'} / "
-                + f"{'—' if usl1 is None else f'{usl1:.1f}'} mmHg</div>"
-                + f"<div><b>Latest</b> {sbp_latest}</div>"
-                + f"<div><b>μ Mean:</b> {sbp_mean}</div>"
-                + f"<div><b>σ Std:</b> {sbp_std}</div>"
-                + f"<div><b>Range:</b> {sbp_rng}</div></div>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                "<div class='stats'><h4>DBP stats</h4>"
-                + f"<div><b>LSL/USL:</b> {'—' if lsl2 is None else f'{lsl2:.1f}'} / "
-                + f"{'—' if usl2 is None else f'{usl2:.1f}'} mmHg</div>"
-                + f"<div><b>Latest</b> {dbp_latest}</div>"
-                + f"<div><b>μ Mean:</b> {dbp_mean}</div>"
-                + f"<div><b>σ Std:</b> {dbp_std}</div>"
-                + f"<div><b>Range:</b> {dbp_rng}</div></div>",
-                unsafe_allow_html=True,
-            )
+    st.info("BP (both) view: dual-line chart can be added here if you want.")
 else:
     sub = plot_df[plot_df["metric"] == metric].copy().sort_values("local_time")
     if sub.empty:
@@ -836,7 +601,9 @@ else:
     else:
         x = sub["local_time"].tolist()
         y = pd.to_numeric(sub["value"], errors="coerce")
-        lsl, usl = get_limits_for_mode(st.session_state.limit_mode, pid, metric, y)
+        lsl, usl = get_limits_for_mode(
+            st.session_state.limit_mode, pid, metric, y
+        )
 
         meals_ts = (
             st.session_state["meals"]["timestamp_utc"].tolist()
@@ -955,7 +722,7 @@ with meal_col:
         )
         do_search = st.form_submit_button("🔎 Search")
     if do_search:
-        hits: list[dict] = []
+        hits = []
         if q.strip():
             try:
                 r = requests.get(
@@ -1075,10 +842,8 @@ else:
                         .strftime("%Y-%m-%d %H:%M %Z")
                     )
                 except Exception:
-                    ts_local = (
-                        pd.to_datetime(row["timestamp_utc"]).strftime(
-                            "%Y-%m-%d %H:%M UTC"
-                        )
+                    ts_local = pd.to_datetime(row["timestamp_utc"]).strftime(
+                        "%Y-%m-%d %H:%M UTC"
                     )
                 st.markdown(
                     f"**{row['food']}**  \n"
