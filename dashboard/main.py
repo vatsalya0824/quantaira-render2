@@ -338,7 +338,8 @@ st.markdown(
 # ─────────────────────────────────────────────
 st.markdown('<div class="pillrow">', unsafe_allow_html=True)
 tw_cols = st.columns(4, gap="small")
-for i, lbl in enumerate(["24h", "3d", "7d", "30d"]):
+# labels now match HOURS_LOOKUP keys exactly
+for i, lbl in enumerate(["24h", "72h", "168h", "720h"]):
     if tw_cols[i].button(lbl, key=f"tw_{lbl}", type="secondary"):
         st.session_state.win = lbl
 st.markdown("</div>", unsafe_allow_html=True)
