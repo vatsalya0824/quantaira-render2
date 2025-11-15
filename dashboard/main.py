@@ -20,7 +20,10 @@ try:
     from fetcher import fetch_data
 except ImportError:
     # fallback: simple HTTP fetcher
-    API_BASE = os.getenv("API_BASE") or st.secrets.get("API_BASE", "https://quantaira-render2.onrender.com/api")
+    API_BASE = os.getenv("API_BASE") or st.secrets.get(
+        "API_BASE",
+        "https://quantaira-render2.onrender.com/api",
+    )
     API_BASE = API_BASE.rstrip("/")
 
     def fetch_data(hours: int, patient_id: str | None = None):
@@ -40,7 +43,7 @@ from common import best_ts_col, convert_tz, split_blood_pressure  # type: ignore
 # Page config
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="Quantaira Dashboard", layout="wide")
-BUILD_TAG = "quantaira-dashboard v2 (iOS layout)"
+BUILD_TAG = "quantaira-dashboard v3 (iOS layout + proper windows)"
 st.markdown(
     f"<div style='opacity:.45;font:12px/1.2 ui-sans-serif,system-ui'>build {BUILD_TAG}</div>",
     unsafe_allow_html=True,
@@ -54,15 +57,29 @@ if not USDA_API_KEY:
     st.warning("USDA_API_KEY not set (env var or .streamlit/secrets.toml)")
 
 P = {
-    "bg": "#F6FBFD", "ink": "#0F172A", "muted": "#667085",
-    "chip": "#F3F6F8", "chipBrd": "rgba(2,6,23,.08)",
-    "tealA": "#48C9C3", "tealB": "#3FB7B2", "glow": "rgba(68,194,189,.32)",
+    "bg": "#F6FBFD",
+    "ink": "#0F172A",
+    "muted": "#667085",
+    "chip": "#F3F6F8",
+    "chipBrd": "rgba(2,6,23,.08)",
+    "tealA": "#48C9C3",
+    "tealB": "#3FB7B2",
+    "glow": "rgba(68,194,189,.32)",
     # GREEN=above, YELLOW=normal, RED=below
-    "segGreen": "#10B981", "segYellow": "#FACC15", "segRed": "#EF4444",
+    "segGreen": "#10B981",
+    "segYellow": "#FACC15",
+    "segRed": "#EF4444",
     "refLine": "rgba(15,23,42,.45)",
-    "pillDot": "#0F172A", "mealDot": "#f472b6", "noteDot": "#14b8a6",
+    "pillDot": "#0F172A",
+    "mealDot": "#f472b6",
+    "noteDot": "#14b8a6",
 }
-UNITS = {"pulse": "bpm", "systolic_bp": "mmHg", "diastolic_bp": "mmHg", "spo2": "%"}
+UNITS = {
+    "pulse": "bpm",
+    "systolic_bp": "mmHg",
+    "diastolic_bp": "mmHg",
+    "spo2": "%",
+}
 
 # sensible global defaults for LSL/USL
 DEFAULT_LIMITS = {
@@ -78,14 +95,27 @@ DEFAULT_LIMITS = {
 DATA_DIR = Path(".user_state")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+
 def _meals_path(pid: str) -> Path:
     return DATA_DIR / f"meals_{pid}.csv"
+
 
 def _notes_path(pid: str) -> Path:
     return DATA_DIR / f"notes_{pid}.csv"
 
-MEAL_COLS = ["timestamp_utc", "food", "kcal", "protein_g", "carbs_g", "fat_g", "sodium_mg", "fdc_id"]
+
+MEAL_COLS = [
+    "timestamp_utc",
+    "food",
+    "kcal",
+    "protein_g",
+    "carbs_g",
+    "fat_g",
+    "sodium_mg",
+    "fdc_id",
+]
 NOTE_COLS = ["timestamp_utc", "note"]
+
 
 def load_meals(pid: str) -> pd.DataFrame:
     p = _meals_path(pid)
@@ -93,8 +123,11 @@ def load_meals(pid: str) -> pd.DataFrame:
         return pd.DataFrame(columns=MEAL_COLS)
     df = pd.read_csv(p, dtype={"fdc_id": "string"})
     if "timestamp_utc" in df.columns:
-        df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True, errors="coerce")
+        df["timestamp_utc"] = pd.to_datetime(
+            df["timestamp_utc"], utc=True, errors="coerce"
+        )
     return df[MEAL_COLS].dropna(subset=["timestamp_utc"])
+
 
 def load_notes(pid: str) -> pd.DataFrame:
     p = _notes_path(pid)
@@ -102,20 +135,29 @@ def load_notes(pid: str) -> pd.DataFrame:
         return pd.DataFrame(columns=NOTE_COLS)
     df = pd.read_csv(p)
     if "timestamp_utc" in df.columns:
-        df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], utc=True, errors="coerce")
+        df["timestamp_utc"] = pd.to_datetime(
+            df["timestamp_utc"], utc=True, errors="coerce"
+        )
     return df[NOTE_COLS].dropna(subset=["timestamp_utc"])
+
 
 def save_meals(pid: str, df: pd.DataFrame):
     out = df.copy()
-    out["timestamp_utc"] = pd.to_datetime(out["timestamp_utc"], utc=True, errors="coerce")
+    out["timestamp_utc"] = pd.to_datetime(
+        out["timestamp_utc"], utc=True, errors="coerce"
+    )
     out = out[MEAL_COLS].sort_values("timestamp_utc").reset_index(drop=True)
     out.to_csv(_meals_path(pid), index=False)
 
+
 def save_notes(pid: str, df: pd.DataFrame):
     out = df.copy()
-    out["timestamp_utc"] = pd.to_datetime(out["timestamp_utc"], utc=True, errors="coerce")
+    out["timestamp_utc"] = pd.to_datetime(
+        out["timestamp_utc"], utc=True, errors="coerce"
+    )
     out = out[NOTE_COLS].sort_values("timestamp_utc").reset_index(drop=True)
     out.to_csv(_notes_path(pid), index=False)
+
 
 # ─────────────────────────────────────────────
 # Session state
@@ -128,6 +170,7 @@ def _get_param(key: str, default: str):
     except Exception:
         pass
     return st.session_state.get(key, default)
+
 
 # you can pass ?pid=54321&name=Todd in URL if needed
 pid = str(_get_param("pid", "quantaira"))
@@ -153,7 +196,10 @@ if "limit_mode" not in st.session_state:
     st.session_state.limit_mode = "Global defaults"
 
 # Initialize meals/notes on first load for this patient
-if "persist_loaded_for" not in st.session_state or st.session_state.persist_loaded_for != pid:
+if (
+    "persist_loaded_for" not in st.session_state
+    or st.session_state.persist_loaded_for != pid
+):
     st.session_state["meals"] = load_meals(pid)
     st.session_state["notes"] = load_notes(pid)
     st.session_state["usda_hits"] = []
@@ -317,10 +363,8 @@ st.markdown("</div>", unsafe_allow_html=True)
 # ─────────────────────────────────────────────
 def load_window(hours: int) -> pd.DataFrame:
     """
-    Pull data from the backend and attach a `timestamp_utc` column.
-
-    We try very hard to guess the right time column so we don't crash
-    if the backend uses a different name (e.g. 'timestamp', 'time', 'event_time').
+    Pull data from the backend and attach a `timestamp_utc` column,
+    then filter rows to the requested time window.
     """
     try:
         df = fetch_data(hours=hours, patient_id=pid)
@@ -345,13 +389,19 @@ def load_window(hours: int) -> pd.DataFrame:
 
     # 3) if we STILL couldn't find a time column, just bail safely
     if ts_col is None or ts_col not in df.columns:
-        # optional: show columns so we can see what Tenovi sends
         st.write("Could not find timestamp column. Columns from API:", list(df.columns))
         return pd.DataFrame()
 
-    # 4) finally, build a proper UTC timestamp column
+    # 4) build a proper UTC timestamp column
     df["timestamp_utc"] = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
-    return df.dropna(subset=["timestamp_utc"])
+    df = df.dropna(subset=["timestamp_utc"])
+
+    # filter to the requested hours
+    cutoff = pd.Timestamp.utcnow().tz_localize("UTC") - pd.Timedelta(hours=hours)
+    df = df[df["timestamp_utc"] >= cutoff]
+
+    return df
+
 
 raw = load_window(HOURS_LOOKUP[st.session_state.win])
 raw = split_blood_pressure(raw)
@@ -359,6 +409,17 @@ raw = split_blood_pressure(raw)
 if raw.empty:
     st.info("No data to display for this window.")
     st.stop()
+
+# TEMP DEBUG: see what Tenovi sends so we can fix pill markers
+st.write(
+    "DEBUG metric values:",
+    raw.get("metric", pd.Series(dtype=str)).dropna().unique()[:20],
+)
+if "device_name" in raw.columns:
+    st.write(
+        "DEBUG device_name values:",
+        raw["device_name"].dropna().unique()[:20],
+    )
 
 try:
     newest = pd.to_datetime(raw["timestamp_utc"], utc=True, errors="coerce").max()
@@ -377,18 +438,22 @@ def prepare(df: pd.DataFrame, tz_name: str):
     df["value"] = pd.to_numeric(df.get("value", df.get("value_1")), errors="coerce")
     df["metric"] = df["metric"].astype(str).str.strip().str.lower()
 
-    # pillbox detection
+    # pillbox detection (we will refine once we see DEBUG output)
     is_pill = df["metric"].eq("pillbox_opened")
     if "device_name" in df.columns:
         is_pill |= df["device_name"].astype(str).str.lower().str.contains(
-            "pillbox", na=False
+            "pillbox",
+            na=False,
         )
 
-    pill_events = df.loc[is_pill, "timestamp_utc"].dropna().sort_values().unique().tolist()
+    pill_events = (
+        df.loc[is_pill, "timestamp_utc"].dropna().sort_values().unique().tolist()
+    )
 
     plot_df = df.loc[~is_pill].copy()
     plot_df["local_time"] = convert_tz(plot_df["timestamp_utc"], tz_name)
     return plot_df, pill_events
+
 
 plot_df, pill_events = prepare(raw, tz_choice)
 
@@ -402,6 +467,7 @@ def suggest_limits(values: pd.Series):
     mu = float(s.mean())
     sd = float(s.std(ddof=0) or 0.0)
     return mu - 0.5 * sd, mu + 0.5 * sd
+
 
 def get_limits_for_mode(mode: str, pid: str, metric: str, values: pd.Series):
     if mode == "Patient override":
@@ -442,12 +508,18 @@ def nearest_indices_utc(x_ts, event_ts_list):
 # Chart.js helpers
 # ─────────────────────────────────────────────
 def chartjs_single_with_markers(
-    x, y, pill_idx, meal_idx, note_idx, lsl, usl, key="cj_single", height=460
+    x,
+    y,
+    pill_idx,
+    meal_idx,
+    note_idx,
+    lsl,
+    usl,
+    key="cj_single",
+    height=460,
 ):
     labels = [pd.to_datetime(t).strftime("%b %d %H:%M") for t in x]
-    data = [
-        None if pd.isna(v) else float(v) for v in pd.to_numeric(y, errors="coerce")
-    ]
+    data = [None if pd.isna(v) else float(v) for v in pd.to_numeric(y, errors="coerce")]
 
     def mask_points(idxs, arr):
         out = [None] * len(arr)
@@ -466,9 +538,7 @@ def chartjs_single_with_markers(
             ref_datasets.append(
                 {
                     "label": "LSL",
-                    "data": [
-                        None if v is None else float(lsl) for v in data
-                    ],
+                    "data": [None if v is None else float(lsl) for v in data],
                     "borderColor": P["refLine"],
                     "borderWidth": 1.2,
                     "borderDash": [6, 4],
@@ -479,9 +549,7 @@ def chartjs_single_with_markers(
             ref_datasets.append(
                 {
                     "label": "USL",
-                    "data": [
-                        None if v is None else float(usl) for v in data
-                    ],
+                    "data": [None if v is None else float(usl) for v in data],
                     "borderColor": P["refLine"],
                     "borderWidth": 1.2,
                     "borderDash": [6, 4],
@@ -560,9 +628,8 @@ def chartjs_single_with_markers(
     )
     st_html(html, height=height, scrolling=False)
 
-# (dual BP chart omitted for brevity; if you want BP both as two lines,
-# you can copy the chartjs_dual_bp_with_markers version from your Patient.py
-# and drop it here exactly as before.)
+# (dual BP chart still omitted; you can paste chartjs_dual_bp_with_markers from Patient.py
+# if you want BP both view.)
 
 # ─────────────────────────────────────────────
 # Render main chart + stats
@@ -570,8 +637,10 @@ def chartjs_single_with_markers(
 metric = st.session_state.metric_sel
 
 if metric == "bp_both":
-    # OPTIONAL: you can plug in your dual BP chart here like in Patient.py.
-    st.info("BP (both) view: copy your dual-BP Chart.js function here if desired.")
+    st.info(
+        "BP (both) view: to show two lines, copy chartjs_dual_bp_with_markers "
+        "from Patient.py into this file."
+    )
 else:
     sub = plot_df[plot_df["metric"] == metric].copy().sort_values("local_time")
     if sub.empty:
@@ -579,7 +648,12 @@ else:
     else:
         x = sub["local_time"].tolist()
         y = pd.to_numeric(sub["value"], errors="coerce")
-        lsl, usl = get_limits_for_mode(st.session_state.limit_mode, pid, metric, y)
+        lsl, usl = get_limits_for_mode(
+            st.session_state.limit_mode,
+            pid,
+            metric,
+            y,
+        )
 
         meals_ts = (
             st.session_state["meals"]["timestamp_utc"].tolist()
@@ -610,7 +684,9 @@ else:
         with stats_col:
             s = pd.to_numeric(sub["value"], errors="coerce").dropna()
             latest = (
-                f"{float(s.iloc[-1]):.1f} {UNITS.get(metric, '')}" if not s.empty else "—"
+                f"{float(s.iloc[-1]):.1f} {UNITS.get(metric, '')}"
+                if not s.empty
+                else "—"
             )
             lsl_s = "—" if lsl is None else f"{lsl:.1f}"
             usl_s = "—" if usl is None else f"{usl:.1f}"
@@ -631,7 +707,7 @@ else:
             )
 
 # ─────────────────────────────────────────────
-# Add Note & Add Meal (USDA) — same layout as your Patient page
+# Add Note & Add Meal (USDA)
 # ─────────────────────────────────────────────
 st.markdown("### Add Note & Add Meal")
 note_col, meal_col = st.columns([1, 2], gap="large")
@@ -640,9 +716,15 @@ with note_col:
     st.subheader("📝 Add Note")
     with st.form("note_form", clear_on_submit=True):
         note_text = st.text_input(
-            "Note", key="note_text_input", placeholder="e.g., felt dizzy after a walk"
+            "Note",
+            key="note_text_input",
+            placeholder="e.g., felt dizzy after a walk",
         )
-        use_now_note = st.checkbox("Use current time", value=False, key="use_now_note")
+        use_now_note = st.checkbox(
+            "Use current time",
+            value=False,
+            key="use_now_note",
+        )
         note_date = st.date_input(
             "When? (date)",
             value=datetime.now().date(),
@@ -663,10 +745,13 @@ with note_col:
             local = pd.Timestamp.combine(note_date, note_time).tz_localize(tz_choice)
             ts_utc = local.tz_convert("UTC")
         new = pd.DataFrame(
-            [{"timestamp_utc": ts_utc, "note": (note_text or "").strip()}]
+            [{"timestamp_utc": ts_utc, "note": (note_text or "").strip()}],
         )
         st.session_state["notes"] = (
-            pd.concat([st.session_state["notes"], new], ignore_index=True)
+            pd.concat(
+                [st.session_state["notes"], new],
+                ignore_index=True,
+            )
             .dropna(subset=["timestamp_utc"])
             .sort_values("timestamp_utc")
             .reset_index(drop=True)
@@ -683,7 +768,11 @@ with meal_col:
             placeholder="grilled chicken salad, oatmeal, …",
             key="usda_query_input",
         )
-        use_now_meal = st.checkbox("Use current time", value=False, key="use_now_meal")
+        use_now_meal = st.checkbox(
+            "Use current time",
+            value=False,
+            key="use_now_meal",
+        )
         mdate = st.date_input(
             "When was it eaten? (date)",
             value=datetime.now().date(),
@@ -740,8 +829,12 @@ with meal_col:
                     fat = val
                 elif "sodium" in nname:
                     sodium = val
-        return int(round(kcal)), round(prot, 1), round(carbs, 1), round(fat, 1), int(
-            round(sodium)
+        return (
+            int(round(kcal)),
+            round(prot, 1),
+            round(carbs, 1),
+            round(fat, 1),
+            int(round(sodium)),
         )
 
     hits = st.session_state.get("usda_hits", [])
@@ -796,7 +889,7 @@ with meal_col:
                     st.rerun()
 
 # ─────────────────────────────────────────────
-# Recent Meals (same layout as your screenshots)
+# Recent Meals
 # ─────────────────────────────────────────────
 st.markdown("### 🍽️ Recent Meals")
 if st.session_state["meals"].empty:
@@ -818,10 +911,8 @@ else:
                         .strftime("%Y-%m-%d %H:%M %Z")
                     )
                 except Exception:
-                    ts_local = (
-                        pd.to_datetime(row["timestamp_utc"]).strftime(
-                            "%Y-%m-%d %H:%M UTC"
-                        )
+                    ts_local = pd.to_datetime(row["timestamp_utc"]).strftime(
+                        "%Y-%m-%d %H:%M UTC"
                     )
                 st.markdown(
                     f"**{row['food']}**  \n"
@@ -830,7 +921,7 @@ else:
                 )
             with top[1]:
                 st.markdown(
-                    f"<div style='text-align:right;font-weight:600;font-size:1.05rem'>"
+                    "<div style='text-align:right;font-weight:600;font-size:1.05rem'>"
                     f"{int(row['kcal'])} kcal</div>",
                     unsafe_allow_html=True,
                 )
