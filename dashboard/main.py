@@ -335,6 +335,9 @@ st.markdown("</div>", unsafe_allow_html=True)
 # ─────────────────────────────────────────────
 # Data loading
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# Data loading
+# ─────────────────────────────────────────────
 def load_window(hours: int) -> pd.DataFrame:
     """
     Pull data from backend and attach a `timestamp_utc` column.
@@ -349,22 +352,32 @@ def load_window(hours: int) -> pd.DataFrame:
 
     df = df.copy()
 
-    ts_col = best_ts_col(df)
+    # 0) explicit known timestamp col names from Tenovi / backend
+    if "timestamp_utc" in df.columns:
+        ts_col = "timestamp_utc"
+    elif "created_utc" in df.columns:          # <-- this is what your API has
+        ts_col = "created_utc"
+    else:
+        # 1) try helper that knows common names
+        ts_col = best_ts_col(df)
 
-    if ts_col is None:
-        for c in df.columns:
-            cl = c.lower()
-            if "time" in cl or "date" in cl:
-                ts_col = c
-                break
+        # 2) if that failed, look for anything containing "time" or "date"
+        if ts_col is None:
+            for c in df.columns:
+                cl = c.lower()
+                if "time" in cl or "date" in cl:
+                    ts_col = c
+                    break
 
+    # 3) if we STILL couldn't find a time column, just bail safely
     if ts_col is None or ts_col not in df.columns:
+        # show columns so we can see what Tenovi sends
         st.write("Could not find timestamp column. Columns from API:", list(df.columns))
         return pd.DataFrame()
 
+    # 4) finally, build a proper UTC timestamp column
     df["timestamp_utc"] = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
     return df.dropna(subset=["timestamp_utc"])
-
 
 raw = load_window(HOURS_LOOKUP[st.session_state.win])
 raw = split_blood_pressure(raw)
